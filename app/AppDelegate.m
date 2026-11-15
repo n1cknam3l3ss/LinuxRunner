@@ -17,6 +17,7 @@
 #import "LinuxRunner/RuntimeBridge.h"
 #import "LinuxRunner/BootLog.h"
 #import "LinuxRunner/HostNameConfiguration.h"
+#import "LinuxRunner/AudioBridge.h"
 #endif
 #import "AppDelegate.h"
 #import "AppGroup.h"
@@ -662,10 +663,19 @@ void NetworkReachabilityCallback(SCNetworkReachabilityRef target, SCNetworkReach
 }
 
 - (void)applicationDidEnterBackground:(UIApplication *)application {
+#ifdef LINUXRUNNER
+    [[LRBackgroundAudioKeeper shared] start];
+#endif
     if (self.exiting) {
         NSLog(@"APP_SHUTDOWN: exiting after background transition");
         exit(0);
     }
+}
+
+- (void)applicationDidBecomeActive:(UIApplication *)application {
+#ifdef LINUXRUNNER
+    [[LRBackgroundAudioKeeper shared] stop];
+#endif
 }
 
 - (void)applicationDidReceiveMemoryWarning:(UIApplication *)application {

@@ -390,6 +390,7 @@ struct ManagerView: View {
     @State private var autoStartRuntime = LRRuntimeBridge.autoStart()
     @AppStorage("LinuxRunner.developerMode") private var developerMode = false
     @AppStorage("LinuxRunner.keepScreenAwake") private var keepScreenAwake = true
+    @AppStorage("LinuxRunner.keepAliveInBackground") private var keepAliveInBackground = true
     @AppStorage("LinuxRunner.experimentalMemoryPCFusion") private var memoryPCFusion = true
     @AppStorage("LinuxRunner.appearance") private var appearance = "dark"
     // One shared timer: a publisher stored on the view struct is rebuilt with
@@ -698,12 +699,15 @@ struct ManagerView: View {
             Section {
                 Picker(selection: $appearance) { Text("Dark").tag("dark"); Text("Light").tag("light"); Text("System").tag("system") } label: { SettingsLabel("Appearance", "circle.lefthalf.filled", .indigo) }
                 Toggle(isOn: $keepScreenAwake) { SettingsLabel("Keep Screen Awake", "sun.max.fill", .orange) }
+                Toggle(isOn: $keepAliveInBackground) { SettingsLabel("Keep Alive in Background", "speaker.slash.fill", .indigo) }.onChange(of: keepAliveInBackground) {
+                    LRBackgroundAudioKeeper.shared().enabled = $0
+                }
                 Toggle(isOn: Binding(get: { LongTaskCenter.notificationsEnabled }, set: { LongTaskCenter.notificationsEnabled = $0 })) { SettingsLabel("Notify When Tasks Finish", "bell.badge.fill", .red) }
                 Picker(selection: Binding(get: { InstallScreensaver.minutes }, set: { InstallScreensaver.minutes = $0 })) {
                     Text("Off").tag(0); Text("3 minutes").tag(3); Text("4 minutes").tag(4); Text("5 minutes").tag(5)
                 } label: { SettingsLabel("Install Screensaver", "moon.zzz.fill", .purple) }
             } header: { Text("General") } footer: {
-                Text("Keep Screen Awake stops auto-lock during installs and terminal commands. Install Screensaver shows a dim, moving status after the chosen idle time; touch to return. Installs continue in both cases; iOS may pause them when you leave the app.")
+                Text("Keep Screen Awake stops auto-lock. Keep Alive in Background plays inaudible silence in the background to prevent iOS from suspending terminal commands, agent tasks, and downloads.")
             }
             Section("Desktop & Display") {
                 Button { desktopSettings = true } label: { SettingsLabel("Desktop Settings", "display", .blue) }.foregroundColor(.primary)

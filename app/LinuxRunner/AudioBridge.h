@@ -16,4 +16,13 @@ NS_ASSUME_NONNULL_BEGIN
 + (BOOL)enabled; // Settings › Audio › Linux Sound (default on)
 @end
 
+// Keeps LinuxRunner and all guest processes running indefinitely in the background
+// by playing an inaudible, silent audio stream configured to mix with other apps.
+@interface LRBackgroundAudioKeeper : NSObject
++ (instancetype)shared;
+@property (nonatomic, assign) BOOL enabled;
+- (void)start;
+- (void)stop;
+@end
+
 NS_ASSUME_NONNULL_END

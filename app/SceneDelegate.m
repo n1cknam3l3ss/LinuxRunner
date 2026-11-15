@@ -11,6 +11,7 @@
 #import "LinuxRunner-Swift.h"
 #import "LinuxRunner/RuntimeBridge.h"
 #import "LinuxRunner/GUIViewController.h"
+#import "LinuxRunner/AudioBridge.h"
 #endif
 
 TerminalViewController *currentTerminalViewController = NULL;
@@ -85,10 +86,17 @@ static NSString *const TerminalUUID = @"TerminalUUID";
 - (void)sceneDidBecomeActive:(UIScene *)scene {
     TerminalViewController *terminalViewController = (TerminalViewController *) self.window.rootViewController;;
 #ifdef LINUXRUNNER
+    [[LRBackgroundAudioKeeper shared] stop];
     terminalViewController = self.runnerTerminal;
     [LRRuntimeBridge logCategory:@"UI" event:@"foreground"];
 #endif
     currentTerminalViewController = terminalViewController;
+}
+
+- (void)sceneDidEnterBackground:(UIScene *)scene {
+#ifdef LINUXRUNNER
+    [[LRBackgroundAudioKeeper shared] start];
+#endif
 }
 
 - (void)sceneWillResignActive:(UIScene *)scene {

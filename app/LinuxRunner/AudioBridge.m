@@ -185,3 +185,123 @@ enum { LRAudioPrebuffer = LRAudioRate * 6 / 100 };  // after running dry, resume
     _engineRunning = YES; _lastError = nil;
 }
 @end
+
+@interface LRBackgroundAudioKeeper ()
+@property (nonatomic, strong) AVAudioPlayer *player;
+@property (nonatomic, assign) BOOL isRunning;
+@end
+
+@implementation LRBackgroundAudioKeeper
+
++ (instancetype)shared {
+    static LRBackgroundAudioKeeper *instance = nil;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        instance = [[LRBackgroundAudioKeeper alloc] init];
+    });
+    return instance;
+}
+
+- (instancetype)init {
+    if ((self = [super init])) {
+        id pref = [NSUserDefaults.standardUserDefaults objectForKey:@"LinuxRunner.keepAliveInBackground"];
+        _enabled = (pref == nil) ? YES : [pref boolValue];
+    }
+    return self;
+}
+
+- (void)setEnabled:(BOOL)enabled {
+    _enabled = enabled;
+    [NSUserDefaults.standardUserDefaults setBool:enabled forKey:@"LinuxRunner.keepAliveInBackground"];
+    if (!enabled && _isRunning) {
+        [self stop];
+    }
+}
+
+static NSData *CreateSilentWAVData(void) {
+    uint32_t sampleRate = 8000;
+    uint32_t numSamples = 8000;
+    uint32_t dataSize = numSamples;
+    uint32_t fileSize = 36 + dataSize;
+    
+    uint8_t header[44] = {
+        'R', 'I', 'F', 'F',
+        (uint8_t)(fileSize & 0xFF), (uint8_t)((fileSize >> 8) & 0xFF), (uint8_t)((fileSize >> 16) & 0xFF), (uint8_t)((fileSize >> 24) & 0xFF),
+        'W', 'A', 'V', 'E',
+        'f', 'm', 't', ' ',
+        16, 0, 0, 0,
+        1, 0,
+        1, 0,
+        (uint8_t)(sampleRate & 0xFF), (uint8_t)((sampleRate >> 8) & 0xFF), (uint8_t)((sampleRate >> 16) & 0xFF), (uint8_t)((sampleRate >> 24) & 0xFF),
+        (uint8_t)(sampleRate & 0xFF), (uint8_t)((sampleRate >> 8) & 0xFF), (uint8_t)((sampleRate >> 16) & 0xFF), (uint8_t)((sampleRate >> 24) & 0xFF),
+        1, 0,
+        8, 0,
+        'd', 'a', 't', 'a',
+        (uint8_t)(dataSize & 0xFF), (uint8_t)((dataSize >> 8) & 0xFF), (uint8_t)((dataSize >> 16) & 0xFF), (uint8_t)((dataSize >> 24) & 0xFF)
+    };
+    
+    NSMutableData *data = [NSMutableData dataWithBytes:header length:44];
+    uint8_t silenceByte = 128;
+    void *silenceBuffer = malloc(numSamples);
+    if (silenceBuffer) {
+        memset(silenceBuffer, silenceByte, numSamples);
+        [data appendBytes:silenceBuffer length:numSamples];
+        free(silenceBuffer);
+    }
+    return data;
+}
+
+- (void)start {
+    void (^block)(void) = ^{
+        if (!self.enabled || self.isRunning) return;
+        
+        NSError *error = nil;
+#if TARGET_OS_IPHONE
+        AVAudioSession *session = AVAudioSession.sharedInstance;
+        if (![session setCategory:AVAudioSessionCategoryPlayback
+                             mode:AVAudioSessionModeDefault
+                          options:AVAudioSessionCategoryOptionMixWithOthers
+                            error:&error]) {
+            NSLog(@"[BackgroundAudioKeeper] setCategory error: %@", error.localizedDescription);
+            return;
+        }
+        if (![session setActive:YES error:&error]) {
+            NSLog(@"[BackgroundAudioKeeper] setActive error: %@", error.localizedDescription);
+            return;
+        }
+#endif
+        if (!self.player) {
+            NSData *silentWav = CreateSilentWAVData();
+            self.player = [[AVAudioPlayer alloc] initWithData:silentWav error:&error];
+            self.player.numberOfLoops = -1;
+            self.player.volume = 0.01f;
+            [self.player prepareToPlay];
+        }
+        
+        if ([self.player play]) {
+            self.isRunning = YES;
+            NSLog(@"[BackgroundAudioKeeper] Started silent background audio keep-alive");
+        } else {
+            NSLog(@"[BackgroundAudioKeeper] Failed to play silent audio");
+        }
+    };
+    if (NSThread.isMainThread) block(); else dispatch_async(dispatch_get_main_queue(), block);
+}
+
+- (void)stop {
+    void (^block)(void) = ^{
+        if (!self.isRunning) return;
+        
+        [self.player stop];
+        self.isRunning = NO;
+#if TARGET_OS_IPHONE
+        [AVAudioSession.sharedInstance setActive:NO
+                                     withOptions:AVAudioSessionSetActiveOptionNotifyOthersOnDeactivation
+                                           error:nil];
+#endif
+        NSLog(@"[BackgroundAudioKeeper] Stopped silent background audio keep-alive");
+    };
+    if (NSThread.isMainThread) block(); else dispatch_async(dispatch_get_main_queue(), block);
+}
+
+@end
