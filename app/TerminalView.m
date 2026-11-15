@@ -351,7 +351,10 @@ static NSString *const HANDLERS[] = {@"syncFocus", @"focus", @"newScrollHeight",
     // Terminal output updates the indicator, not the user's scroll position.
     if (self.updatingTerminalScroll)
         return;
-    [self.terminal.webView evaluateJavaScript:[NSString stringWithFormat:@"exports.newScrollTop(%f)", scrollView.contentOffset.y] completionHandler:nil];
+    // Only forward scroll offsets if the user is actively dragging/tracking the scrollbar
+    if (scrollView.isTracking || scrollView.isDragging || scrollView.isDecelerating) {
+        [self.terminal.webView evaluateJavaScript:[NSString stringWithFormat:@"exports.newScrollTop(%f)", scrollView.contentOffset.y] completionHandler:nil];
+    }
 }
 
 - (void)setKeyboardAppearance:(UIKeyboardAppearance)keyboardAppearance {
@@ -377,6 +380,9 @@ static NSString *const HANDLERS[] = {@"syncFocus", @"focus", @"newScrollHeight",
 - (void)insertText:(NSString *)text {
     self.markedText = nil;
 
+    // Scroll to bottom on input (standard terminal behavior)
+    [self.terminal.webView evaluateJavaScript:@"exports.scrollToBottom?.()" completionHandler:nil];
+
     if (self.controlKey.highlighted)
         self.controlKey.selected = YES;
     if (self.controlKey.selected) {
@@ -397,6 +403,7 @@ static NSString *const HANDLERS[] = {@"syncFocus", @"focus", @"newScrollHeight",
 }
 
 - (void)insertControlChar:(char)ch {
+    [self.terminal.webView evaluateJavaScript:@"exports.scrollToBottom?.()" completionHandler:nil];
     if (strchr(controlKeys, ch) != NULL) {
         if (ch == ' ') ch = '\0';
         if (ch == '2') ch = '@';
@@ -408,6 +415,7 @@ static NSString *const HANDLERS[] = {@"syncFocus", @"focus", @"newScrollHeight",
 }
 
 - (void)deleteBackward {
+    [self.terminal.webView evaluateJavaScript:@"exports.scrollToBottom?.()" completionHandler:nil];
     [self insertText:@"\x7f"];
 }
 
@@ -506,9 +514,15 @@ static NSString *const HANDLERS[] = {@"syncFocus", @"focus", @"newScrollHeight",
 
 - (UIMenu *)editMenuInteraction:(UIEditMenuInteraction *)interaction menuForConfiguration:(UIEditMenuConfiguration *)configuration suggestedActions:(NSArray<UIMenuElement *> *)suggestedActions API_AVAILABLE(ios(16.0)) {
     __weak TerminalView *view = self;
-    UIAction *copy = [UIAction actionWithTitle:@"Copy" image:[UIImage systemImageNamed:@"doc.on.doc"] identifier:nil handler:^(UIAction *action) { [view copy:nil]; }];
-    UIAction *selectAll = [UIAction actionWithTitle:@"Select All" image:nil identifier:nil handler:^(UIAction *action) { [view selectAll:nil]; }];
-    return [UIMenu menuWithChildren:@[copy, selectAll]];
+    NSMutableArray<UIMenuElement *> *actions = [NSMutableArray array];
+    if (view.selectedText.length > 0) {
+        [actions addObject:[UIAction actionWithTitle:@"Copy" image:[UIImage systemImageNamed:@"doc.on.doc"] identifier:nil handler:^(UIAction *action) { [view copy:nil]; }]];
+    }
+    if (UIPasteboard.generalPasteboard.hasStrings) {
+        [actions addObject:[UIAction actionWithTitle:@"Paste" image:[UIImage systemImageNamed:@"doc.on.clipboard"] identifier:nil handler:^(UIAction *action) { [view paste:nil]; }]];
+    }
+    [actions addObject:[UIAction actionWithTitle:@"Select All" image:[UIImage systemImageNamed:@"selection.pin.in.out"] identifier:nil handler:^(UIAction *action) { [view selectAll:nil]; }]];
+    return [UIMenu menuWithChildren:actions];
 }
 
 - (void)clearScrollback:(UIKeyCommand *)command {

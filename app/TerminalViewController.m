@@ -642,7 +642,12 @@ session_failed:
     else if ([label isEqualToString:@"↓"]) [self pressKey:[self.terminal arrow:'B']];
     else if ([label isEqualToString:@"←"]) [self pressKey:[self.terminal arrow:'D']];
     else if ([label isEqualToString:@"→"]) [self pressKey:[self.terminal arrow:'C']];
-    else if (sequences[label]) [self.terminal sendInput:[sequences[label] dataUsingEncoding:NSUTF8StringEncoding]];
+    else if (sequences[label]) {
+        if (![label isEqualToString:@"PGUP"] && ![label isEqualToString:@"PGDN"]) {
+            [self.termView.terminal.webView evaluateJavaScript:@"exports.scrollToBottom?.()" completionHandler:nil];
+        }
+        [self.terminal sendInput:[sequences[label] dataUsingEncoding:NSUTF8StringEncoding]];
+    }
     else [self pressKey:label];   // "/", "-", "~", "|": through Ctrl/Alt latches like typed text
 }
 - (void)hideKeyboard:(id)sender { [self.termView resignFirstResponder]; }

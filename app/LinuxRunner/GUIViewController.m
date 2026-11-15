@@ -658,6 +658,11 @@ static const NSInteger LRDockPortraitOnlyTag=7803;   // DeX, Settings, More, Pow
 - (void)pressesBegan:(NSSet<UIPress *> *)presses withEvent:(UIPressesEvent *)event{
     NSMutableSet *unhandled=[presses mutableCopy];
     for(UIPress *p in presses)if(p.key){UIKey *key=p.key;_hardwareModifiers=key.modifierFlags;
+        // Software keyboard text input is handled cleanly by insertText:
+        if(_softwareKeyboardRequested && key.characters.length > 0 && key.keyCode < UIKeyboardHIDUsageKeyboardLeftControl) {
+            [unhandled removeObject:p];
+            continue;
+        }
         unsigned own=LRModifierForHID((unsigned)key.keyCode);
         if(own==LR_KEY_SHIFT)_hardwareModifiers|=UIKeyModifierShift;
         if(own==LR_KEY_CONTROL)_hardwareModifiers|=UIKeyModifierControl;
@@ -679,7 +684,12 @@ static const NSInteger LRDockPortraitOnlyTag=7803;   // DeX, Settings, More, Pow
 }
 - (void)pressesEnded:(NSSet<UIPress *> *)presses withEvent:(UIPressesEvent *)event{
     NSMutableSet *unhandled=[presses mutableCopy];
-    for(UIPress *p in presses)if(p.key){UIKey *key=p.key;NSNumber *cached=_pressedKeys[@(key.keyCode)];
+    for(UIPress *p in presses)if(p.key){UIKey *key=p.key;
+        if(_softwareKeyboardRequested && key.characters.length > 0 && key.keyCode < UIKeyboardHIDUsageKeyboardLeftControl) {
+            [unhandled removeObject:p];
+            continue;
+        }
+        NSNumber *cached=_pressedKeys[@(key.keyCode)];
         [self countInput:@"keyboard.hardware.up"];
         uint32_t symbol=cached?cached.unsignedIntValue:[self symbolForKey:key];
         if(symbol){[_client key:symbol down:NO];[_pressedKeys removeObjectForKey:@(key.keyCode)];}

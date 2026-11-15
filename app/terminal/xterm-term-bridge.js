@@ -153,7 +153,11 @@
             return;
         resizeFrame = requestAnimationFrame(() => {
             resizeFrame = null;
+            const wasAtBottom = term.buffer.active.viewportY >= Math.max(0, term.buffer.active.baseY - 1);
             fitAddon.fit();
+            if (wasAtBottom) {
+                term.scrollToBottom();
+            }
             // The glyph atlas is built for the pixel density seen when the
             // terminal opened (1x while the web view was still offscreen);
             // WKWebView sends no DPR change, so rebuild it when the density
@@ -291,17 +295,59 @@
     }
 
     function installFocusBridge() {
+        let touchStartY = 0;
+        let touchStartX = 0;
+        let isTouchDragging = false;
+        let touchScrollAccumulator = 0;
+
         terminalElement.addEventListener('touchstart', (event) => {
-            if (!term.hasSelection())
-                event.preventDefault();
-        }, {capture: true});
+            if (event.touches.length === 1) {
+                touchStartY = event.touches[0].clientY;
+                touchStartX = event.touches[0].clientX;
+                isTouchDragging = false;
+                touchScrollAccumulator = 0;
+            }
+        }, {capture: true, passive: false});
+
+        terminalElement.addEventListener('touchmove', (event) => {
+            if (event.touches.length === 1) {
+                const currentY = event.touches[0].clientY;
+                const currentX = event.touches[0].clientX;
+                const deltaY = currentY - touchStartY;
+                const deltaX = currentX - touchStartX;
+
+                if (Math.abs(deltaY) > 6 || Math.abs(deltaX) > 6 || isTouchDragging) {
+                    isTouchDragging = true;
+                    event.preventDefault();
+
+                    const cellHeight = getCellSize().height || 18;
+                    touchScrollAccumulator += (touchStartY - currentY);
+                    touchStartY = currentY;
+
+                    const lines = Math.trunc(touchScrollAccumulator / cellHeight);
+                    if (lines !== 0) {
+                        term.scrollLines(lines);
+                        touchScrollAccumulator -= (lines * cellHeight);
+                        scheduleScrollSync();
+                    }
+                }
+            }
+        }, {capture: true, passive: false});
+
         terminalElement.addEventListener('touchend', (event) => {
-            if (term.hasSelection())
-                term.clearSelection();
-            event.preventDefault();
-            event.stopImmediatePropagation();
-            native.focus();
+            if (isTouchDragging) {
+                event.preventDefault();
+                event.stopImmediatePropagation();
+                isTouchDragging = false;
+                return;
+            }
+            if (!term.hasSelection()) {
+                event.preventDefault();
+                event.stopImmediatePropagation();
+                native.focus();
+            }
         }, {capture: true});
+
         terminalElement.addEventListener('mousedown', (event) => {
             event.preventDefault();
             if (!term.hasSelection())

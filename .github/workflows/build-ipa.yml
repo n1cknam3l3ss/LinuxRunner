@@ -1,0 +1,37 @@
+name: Build LinuxRunner IPA
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build IPA
+    runs-on: macos-14
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 0
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install build tools
+        run: |
+          brew install meson ninja cmake pkg-config llvm
+
+      - name: Build Unsigned IPA
+        run: |
+          scripts/build-ipa.sh --unsigned
+
+      - name: Upload IPA Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: LinuxRunner-Fixed-IPA
+          path: build/releases/*.ipa
