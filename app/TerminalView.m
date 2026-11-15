@@ -317,6 +317,7 @@ static NSString *const HANDLERS[] = {@"syncFocus", @"focus", @"newScrollHeight",
         if (!self.isFirstResponder) {
             [self becomeFirstResponder];
         }
+        [self.terminal.webView evaluateJavaScript:@"exports.scrollToBottom?.()" completionHandler:nil];
     } else if ([message.name isEqualToString:@"newScrollHeight"]) {
         if (![message.body isKindOfClass:NSNumber.class])
             return;

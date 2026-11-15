@@ -96,6 +96,7 @@
     let oldProps = {};
     let xtermAppActive = null;
     let selectionAnchor = null;
+    let isSelecting = false;
 
     // ── Terminal setup ────────────────────────────────────────────────────────
     const term = new Terminal({
@@ -153,11 +154,9 @@
             return;
         resizeFrame = requestAnimationFrame(() => {
             resizeFrame = null;
-            const wasAtBottom = term.buffer.active.viewportY >= Math.max(0, term.buffer.active.baseY - 1);
             fitAddon.fit();
-            if (wasAtBottom) {
-                term.scrollToBottom();
-            }
+            // Resizing viewport (e.g. keyboard opening) should keep user at the bottom prompt
+            term.scrollToBottom();
             // The glyph atlas is built for the pixel density seen when the
             // terminal opened (1x while the web view was still offscreen);
             // WKWebView sends no DPR change, so rebuild it when the density
@@ -198,11 +197,13 @@
             return term.getSelection();
         },
         beginSelection(x, y) {
+            isSelecting = true;
             selectionAnchor = selectionCell(x, y);
             if (selectionAnchor)
                 term.select(selectionAnchor.col, selectionAnchor.row, 1);
         },
         extendSelection(x, y) {
+            isSelecting = true;
             const end = selectionCell(x, y);
             if (!selectionAnchor || !end)
                 return;
@@ -211,11 +212,15 @@
             const start = Math.min(a, b);
             term.select(start % term.cols, Math.floor(start / term.cols), Math.abs(a - b) + 1);
         },
-        selectAll() { term.selectAll(); },
-        clearSelection() { selectionAnchor = null; term.clearSelection(); },
+        selectAll() { isSelecting = true; term.selectAll(); },
+        clearSelection() { isSelecting = false; selectionAnchor = null; term.clearSelection(); },
         setFocused(focused) {
             terminalElement.classList.toggle('terminal-focused', !!focused);
             setXtermAppActive(!!focused);
+            if (focused) {
+                term.scrollToBottom();
+                scheduleScrollSync();
+            }
         },
         scrollToBottom() {
             term.scrollToBottom();
@@ -229,8 +234,10 @@
                 return;
             const buffer = term.buffer.active;
             const line = Math.max(0, Math.min(buffer.baseY, Math.round(top / cellHeight)));
-            // UIKit owns fractional offsets and momentum. Do not snap its
-            // offset back to the rounded row when acknowledging this request.
+            // Reject spurious reset to line 0 if user was at or near the bottom
+            if (line === 0 && buffer.baseY > 2 && buffer.viewportY > buffer.baseY / 2) {
+                return;
+            }
             nativeScrollRequest = {buffer, line, cellHeight};
             term.scrollToLine(line);
             scheduleScrollSync();
@@ -299,6 +306,8 @@
         let touchStartX = 0;
         let isTouchDragging = false;
         let touchScrollAccumulator = 0;
+        let longPressTimer = null;
+        let isLongPressActive = false;
 
         terminalElement.addEventListener('touchstart', (event) => {
             if (event.touches.length === 1) {
@@ -306,17 +315,30 @@
                 touchStartX = event.touches[0].clientX;
                 isTouchDragging = false;
                 touchScrollAccumulator = 0;
+                isLongPressActive = false;
+
+                clearTimeout(longPressTimer);
+                // If user holds stationary for 220ms, it is a long-press (selection / link interaction)
+                longPressTimer = setTimeout(() => {
+                    isLongPressActive = true;
+                }, 220);
             }
         }, {capture: true, passive: false});
 
         terminalElement.addEventListener('touchmove', (event) => {
             if (event.touches.length === 1) {
+                // If finger is long-pressed on text or selection is active, disable scroll completely!
+                if (isLongPressActive || isSelecting || selectionAnchor !== null) {
+                    return;
+                }
+
                 const currentY = event.touches[0].clientY;
                 const currentX = event.touches[0].clientX;
                 const deltaY = currentY - touchStartY;
                 const deltaX = currentX - touchStartX;
 
-                if (Math.abs(deltaY) > 6 || Math.abs(deltaX) > 6 || isTouchDragging) {
+                if (Math.abs(deltaY) > 8 || Math.abs(deltaX) > 8 || isTouchDragging) {
+                    clearTimeout(longPressTimer);
                     isTouchDragging = true;
                     event.preventDefault();
 
@@ -335,6 +357,12 @@
         }, {capture: true, passive: false});
 
         terminalElement.addEventListener('touchend', (event) => {
+            clearTimeout(longPressTimer);
+            if (isLongPressActive || isSelecting || selectionAnchor !== null) {
+                isLongPressActive = false;
+                isTouchDragging = false;
+                return;
+            }
             if (isTouchDragging) {
                 event.preventDefault();
                 event.stopImmediatePropagation();
@@ -347,6 +375,12 @@
                 native.focus();
             }
         }, {capture: true});
+
+        terminalElement.addEventListener('touchcancel', () => {
+            clearTimeout(longPressTimer);
+            isLongPressActive = false;
+            isTouchDragging = false;
+        });
 
         terminalElement.addEventListener('mousedown', (event) => {
             event.preventDefault();
