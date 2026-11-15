@@ -86,7 +86,7 @@ static NSString *const TerminalUUID = @"TerminalUUID";
 - (void)sceneDidBecomeActive:(UIScene *)scene {
     TerminalViewController *terminalViewController = (TerminalViewController *) self.window.rootViewController;;
 #ifdef LINUXRUNNER
-    [[LRBackgroundAudioKeeper shared] stop];
+    [[LRBackgroundAudioKeeper shared] start];
     terminalViewController = self.runnerTerminal;
     [LRRuntimeBridge logCategory:@"UI" event:@"foreground"];
 #endif

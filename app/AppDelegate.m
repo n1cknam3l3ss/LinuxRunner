@@ -545,6 +545,9 @@ void NetworkReachabilityCallback(SCNetworkReachabilityRef target, SCNetworkReach
 }
 
 - (BOOL)application:(UIApplication *)application didFinishLaunchingWithOptions:(NSDictionary *)launchOptions {
+#ifdef LINUXRUNNER
+    [[LRBackgroundAudioKeeper shared] start];
+#endif
     // get the network permissions popup to appear on chinese devices
     [[NSURLSession.sharedSession dataTaskWithURL:[NSURL URLWithString:@"http://captive.apple.com"]] resume];
 
@@ -674,7 +677,7 @@ void NetworkReachabilityCallback(SCNetworkReachabilityRef target, SCNetworkReach
 
 - (void)applicationDidBecomeActive:(UIApplication *)application {
 #ifdef LINUXRUNNER
-    [[LRBackgroundAudioKeeper shared] stop];
+    [[LRBackgroundAudioKeeper shared] start];
 #endif
 }
 

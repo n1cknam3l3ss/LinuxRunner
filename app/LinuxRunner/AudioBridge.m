@@ -206,6 +206,11 @@ enum { LRAudioPrebuffer = LRAudioRate * 6 / 100 };  // after running dry, resume
     if ((self = [super init])) {
         id pref = [NSUserDefaults.standardUserDefaults objectForKey:@"LinuxRunner.keepAliveInBackground"];
         _enabled = (pref == nil) ? YES : [pref boolValue];
+        if (_enabled) {
+            dispatch_async(dispatch_get_main_queue(), ^{
+                [self start];
+            });
+        }
     }
     return self;
 }
@@ -213,7 +218,9 @@ enum { LRAudioPrebuffer = LRAudioRate * 6 / 100 };  // after running dry, resume
 - (void)setEnabled:(BOOL)enabled {
     _enabled = enabled;
     [NSUserDefaults.standardUserDefaults setBool:enabled forKey:@"LinuxRunner.keepAliveInBackground"];
-    if (!enabled && _isRunning) {
+    if (enabled) {
+        [self start];
+    } else {
         [self stop];
     }
 }
