@@ -958,6 +958,59 @@ final class NativeContainer: UIViewController {
     override var supportedInterfaceOrientations: UIInterfaceOrientationMask { child.supportedInterfaceOrientations }
 }
 
+struct LiveMemoryBadge: View {
+    @State private var footprintGB: Double = 0
+    @State private var limitGB: Double = 6.23
+    let timer = Timer.publish(every: 1.0, on: .main, in: .common).autoconnect()
+
+    var body: some View {
+        HStack(spacing: 5) {
+            Circle()
+                .fill(indicatorColor)
+                .frame(width: 7, height: 7)
+            Text(String(format: "RAM: %.2f / %.2f GB", footprintGB, limitGB))
+                .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                .foregroundColor(textColor)
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 3)
+        .background(Color.white.opacity(0.12))
+        .cornerRadius(6)
+        .onReceive(timer) { _ in updateMemory() }
+        .onAppear { updateMemory() }
+    }
+
+    private var indicatorColor: Color {
+        if footprintGB >= 5.5 { return .red }
+        if footprintGB >= 4.8 { return .yellow }
+        return .green
+    }
+
+    private var textColor: Color {
+        if footprintGB >= 5.5 { return .red }
+        if footprintGB >= 4.8 { return .yellow }
+        return .white.opacity(0.85)
+    }
+
+    private func updateMemory() {
+        var info = task_vm_info_data_t()
+        var count = mach_msg_type_number_t(MemoryLayout<task_vm_info_data_t>.size / MemoryLayout<natural_t>.size)
+        let kerr = withUnsafeMutablePointer(to: &info) { pointer in
+            pointer.withMemoryRebound(to: integer_t.self, capacity: Int(count)) {
+                task_info(mach_task_self_, task_flavor_t(TASK_VM_INFO), $0, &count)
+            }
+        }
+        if kerr == KERN_SUCCESS {
+            footprintGB = Double(info.phys_footprint) / 1_073_741_824
+        }
+        let avail = os_proc_available_memory()
+        if avail > 0 {
+            let total = footprintGB + (Double(avail) / 1_073_741_824)
+            if total > 1.0 { limitGB = total }
+        }
+    }
+}
+
 struct TerminalScreen: View {
     let controller: TerminalViewController
     @Environment(\.dismiss) private var dismiss
@@ -967,9 +1020,10 @@ struct TerminalScreen: View {
         return catalog?.environments.first(where: { $0.rootfsName == root })?.name ?? "Linux"
     }
     var body: some View {
-        // Minimal chrome: true black and one blue Done (font size is in Settings).
+        // Minimal chrome: true black, RAM monitor on left, blue Done on right.
         VStack(spacing: 0) {
             HStack {
+                LiveMemoryBadge()
                 Spacer()
                 Button("Done") { dismiss() }.font(.body.weight(.semibold)).foregroundColor(.accentColor)
             }
