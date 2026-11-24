@@ -960,17 +960,22 @@ final class NativeContainer: UIViewController {
 
 struct LiveMemoryBadge: View {
     @State private var footprintGB: Double = 0
-    @State private var limitGB: Double = 6.23
-    let timer = Timer.publish(every: 1.0, on: .main, in: .common).autoconnect()
+    @State private var availableGB: Double?
+    @State private var limitGB: Double?
+    @State private var sysUsedGB: Double?
+    @State private var sysTotalGB: Double?
+    let timer = Timer.publish(every: 0.5, on: .main, in: .common).autoconnect()
 
     var body: some View {
         HStack(spacing: 5) {
             Circle()
                 .fill(indicatorColor)
                 .frame(width: 7, height: 7)
-            Text(String(format: "RAM: %.2f / %.2f GB", footprintGB, limitGB))
-                .font(.system(size: 12, weight: .semibold, design: .monospaced))
+            Text(labelText)
+                .font(.system(size: 11, weight: .semibold, design: .monospaced))
                 .foregroundColor(textColor)
+                .lineLimit(1)
+                .minimumScaleFactor(0.75)
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 3)
@@ -980,16 +985,42 @@ struct LiveMemoryBadge: View {
         .onAppear { updateMemory() }
     }
 
+    private var labelText: String {
+        let lr = limitGB.map { String(format: "LR: %.2f/%.2fG", footprintGB, $0) }
+            ?? String(format: "LR: %.2fG", footprintGB)
+        if let used = sysUsedGB, let total = sysTotalGB {
+            return "\(lr) · " + String(format: "Sys: %.1f/%.1fG", used, total)
+        }
+        return lr
+    }
+
+    private var severity: Int {
+        if let avail = availableGB {
+            if avail < 0.35 { return 2 }
+            if avail < 0.90 { return 1 }
+        }
+        if let limit = limitGB, limit > 0 {
+            let ratio = footprintGB / limit
+            if ratio >= 0.88 { return 2 }
+            if ratio >= 0.72 { return 1 }
+        }
+        return 0
+    }
+
     private var indicatorColor: Color {
-        if footprintGB >= 5.5 { return .red }
-        if footprintGB >= 4.8 { return .yellow }
-        return .green
+        switch severity {
+        case 2: return .red
+        case 1: return .yellow
+        default: return .green
+        }
     }
 
     private var textColor: Color {
-        if footprintGB >= 5.5 { return .red }
-        if footprintGB >= 4.8 { return .yellow }
-        return .white.opacity(0.85)
+        switch severity {
+        case 2: return .red
+        case 1: return .yellow
+        default: return .white.opacity(0.85)
+        }
     }
 
     private func updateMemory() {
@@ -1005,8 +1036,30 @@ struct LiveMemoryBadge: View {
         }
         let avail = os_proc_available_memory()
         if avail > 0 {
-            let total = footprintGB + (Double(avail) / 1_073_741_824)
-            if total > 1.0 { limitGB = total }
+            let availVal = Double(avail) / 1_073_741_824
+            availableGB = availVal
+            limitGB = max(footprintGB, footprintGB + availVal)
+        } else {
+            availableGB = nil
+        }
+
+        let host = mach_host_self()
+        var pageSize: vm_size_t = 0
+        host_page_size(host, &pageSize)
+        var vmStat = vm_statistics64_data_t()
+        var vmCount = mach_msg_type_number_t(MemoryLayout<vm_statistics64_data_t>.stride / MemoryLayout<integer_t>.stride)
+        let vmKerr = withUnsafeMutablePointer(to: &vmStat) { pointer in
+            pointer.withMemoryRebound(to: integer_t.self, capacity: Int(vmCount)) {
+                host_statistics64(host, HOST_VM_INFO64, $0, &vmCount)
+            }
+        }
+        if vmKerr == KERN_SUCCESS, pageSize > 0 {
+            let internalPages = Int64(vmStat.internal_page_count)
+            let purgeablePages = Int64(vmStat.purgeable_count)
+            let appPages = max(0, internalPages - purgeablePages)
+            let usedBytes = Double(appPages + Int64(vmStat.wire_count) + Int64(vmStat.compressor_page_count)) * Double(pageSize)
+            sysUsedGB = usedBytes / 1_073_741_824
+            sysTotalGB = Double(ProcessInfo.processInfo.physicalMemory) / 1_073_741_824
         }
     }
 }
