@@ -1,5 +1,8 @@
 #import "AudioBridge.h"
 #import <AVFoundation/AVFoundation.h>
+#if TARGET_OS_IPHONE
+#import <UIKit/UIKit.h>
+#endif
 #include <arpa/inet.h>
 #include <netinet/in.h>
 #include <stdatomic.h>
@@ -66,7 +69,7 @@ enum { LRAudioPrebuffer = LRAudioRate * 6 / 100 };  // after running dry, resume
         self->_interruptionObserver = nil;
         [self->_engine stop];
 #if TARGET_OS_IPHONE
-        if (self->_engineRunning)
+        if (self->_engineRunning && ![LRBackgroundAudioKeeper shared].enabled)
             [AVAudioSession.sharedInstance setActive:NO withOptions:AVAudioSessionSetActiveOptionNotifyOthersOnDeactivation error:nil];
 #endif
         self->_engineRunning = NO; self->_engine = nil; self->_source = nil;
@@ -189,6 +192,7 @@ enum { LRAudioPrebuffer = LRAudioRate * 6 / 100 };  // after running dry, resume
 @interface LRBackgroundAudioKeeper ()
 @property (nonatomic, strong) AVAudioPlayer *player;
 @property (nonatomic, assign) BOOL isRunning;
+@property (nonatomic, strong) NSMutableArray *observers;
 @end
 
 @implementation LRBackgroundAudioKeeper
@@ -206,6 +210,8 @@ enum { LRAudioPrebuffer = LRAudioRate * 6 / 100 };  // after running dry, resume
     if ((self = [super init])) {
         id pref = [NSUserDefaults.standardUserDefaults objectForKey:@"LinuxRunner.keepAliveInBackground"];
         _enabled = (pref == nil) ? YES : [pref boolValue];
+        _observers = [NSMutableArray new];
+        [self registerObservers];
         if (_enabled) {
             dispatch_async(dispatch_get_main_queue(), ^{
                 [self start];
@@ -213,6 +219,81 @@ enum { LRAudioPrebuffer = LRAudioRate * 6 / 100 };  // after running dry, resume
         }
     }
     return self;
+}
+
+- (void)dealloc {
+    for (id observer in _observers) {
+        [NSNotificationCenter.defaultCenter removeObserver:observer];
+    }
+}
+
+- (void)registerObservers {
+#if TARGET_OS_IPHONE
+    NSNotificationCenter *center = NSNotificationCenter.defaultCenter;
+    AVAudioSession *session = AVAudioSession.sharedInstance;
+    __weak typeof(self) weakSelf = self;
+
+    [_observers addObject:[center addObserverForName:AVAudioSessionInterruptionNotification
+                                              object:session
+                                               queue:NSOperationQueue.mainQueue
+                                          usingBlock:^(NSNotification *note) {
+        typeof(self) strong = weakSelf;
+        if (!strong) return;
+        AVAudioSessionInterruptionType type =
+            [note.userInfo[AVAudioSessionInterruptionTypeKey] unsignedIntegerValue];
+        if (type == AVAudioSessionInterruptionTypeBegan) {
+            strong.isRunning = NO;
+        } else if (type == AVAudioSessionInterruptionTypeEnded && strong.enabled) {
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.25 * NSEC_PER_SEC)),
+                           dispatch_get_main_queue(), ^{
+                [strong start];
+            });
+        }
+    }]];
+
+    [_observers addObject:[center addObserverForName:AVAudioSessionMediaServicesWereResetNotification
+                                              object:session
+                                               queue:NSOperationQueue.mainQueue
+                                          usingBlock:^(NSNotification *note) {
+        (void)note;
+        typeof(self) strong = weakSelf;
+        if (!strong) return;
+        strong.player = nil;
+        strong.isRunning = NO;
+        if (strong.enabled) [strong start];
+    }]];
+
+    [_observers addObject:[center addObserverForName:AVAudioSessionSilenceSecondaryAudioHintNotification
+                                              object:session
+                                               queue:NSOperationQueue.mainQueue
+                                          usingBlock:^(NSNotification *note) {
+        typeof(self) strong = weakSelf;
+        if (!strong || !strong.enabled) return;
+        AVAudioSessionSilenceSecondaryAudioHintType hint =
+            [note.userInfo[AVAudioSessionSilenceSecondaryAudioHintTypeKey] unsignedIntegerValue];
+        if (hint == AVAudioSessionSilenceSecondaryAudioHintTypeEnd) {
+            [strong start];
+        }
+    }]];
+
+    [_observers addObject:[center addObserverForName:UIApplicationDidBecomeActiveNotification
+                                              object:nil
+                                               queue:NSOperationQueue.mainQueue
+                                          usingBlock:^(NSNotification *note) {
+        (void)note;
+        typeof(self) strong = weakSelf;
+        if (strong && strong.enabled) [strong start];
+    }]];
+
+    [_observers addObject:[center addObserverForName:UIApplicationDidEnterBackgroundNotification
+                                              object:nil
+                                               queue:NSOperationQueue.mainQueue
+                                          usingBlock:^(NSNotification *note) {
+        (void)note;
+        typeof(self) strong = weakSelf;
+        if (strong && strong.enabled) [strong start];
+    }]];
+#endif
 }
 
 - (void)setEnabled:(BOOL)enabled {
@@ -260,7 +341,9 @@ static NSData *CreateSilentWAVData(void) {
 
 - (void)start {
     void (^block)(void) = ^{
-        if (!self.enabled || self.isRunning) return;
+        if (!self.enabled) return;
+        if (self.isRunning && self.player && self.player.isPlaying) return;
+        self.isRunning = NO;
         
         NSError *error = nil;
 #if TARGET_OS_IPHONE
@@ -297,14 +380,16 @@ static NSData *CreateSilentWAVData(void) {
 
 - (void)stop {
     void (^block)(void) = ^{
-        if (!self.isRunning) return;
+        if (!self.isRunning && !self.player.isPlaying) return;
         
         [self.player stop];
         self.isRunning = NO;
 #if TARGET_OS_IPHONE
-        [AVAudioSession.sharedInstance setActive:NO
-                                     withOptions:AVAudioSessionSetActiveOptionNotifyOthersOnDeactivation
-                                           error:nil];
+        if (![LRAudioBridge enabled]) {
+            [AVAudioSession.sharedInstance setActive:NO
+                                         withOptions:AVAudioSessionSetActiveOptionNotifyOthersOnDeactivation
+                                               error:nil];
+        }
 #endif
         NSLog(@"[BackgroundAudioKeeper] Stopped silent background audio keep-alive");
     };

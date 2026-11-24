@@ -343,9 +343,12 @@ struct InstallScreensaverView: View {
         switch manager.authorizationStatus {
         case .notDetermined:
             status = "Waiting for location permission"
-            manager.requestWhenInUseAuthorization()
+            manager.requestAlwaysAuthorization()
         case .denied, .restricted:
             status = "Location permission denied: allow it in iOS Settings > LinuxRunner > Location"
+        case .authorizedWhenInUse:
+            manager.requestAlwaysAuthorization()
+            fallthrough
         default:
             manager.allowsBackgroundLocationUpdates = true
             manager.showsBackgroundLocationIndicator = true
